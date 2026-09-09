@@ -735,7 +735,7 @@ async function startCorrection() {
         var resp = await fetch(cfg.apiUrl, {
           method:'POST',
           headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'true'},
-          body:JSON.stringify({model:cfg.model,messages:[{role:'system',content:prompts[i-1]},{role:'user',content:txt}],temperature:cfg.temp,max_tokens:maxTok,response_format:{type:"json_object"}}),
+          body:JSON.stringify({model:cfg.model,messages:[{role:'system',content:prompts[i-1]},{role:'user',content:txt}],temperature:cfg.temp,max_tokens:maxTok}),
           signal:AbortSignal.timeout(240000)
         });
         if (!resp.ok) {
