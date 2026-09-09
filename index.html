@@ -603,7 +603,7 @@ function doOCR() {
     fetch(cfg.apiUrl, {
       method:'POST',
       headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'true'},
-      body:JSON.stringify({model:cfg.model,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+base64}},{type:'text',text:ocrPrompt}]}],temperature:0.1,max_tokens:4000}),
+      body:JSON.stringify({model:cfg.model,messages:[{role:'user',content:[{type:'image_url',image_url:{url:'data:'+mime+';base64,'+base64}},{type:'text',text:ocrPrompt}]}],temperature:0,max_tokens:2048}),
       signal:AbortSignal.timeout(180000)
     }).then(function(resp){
       if (!resp.ok) throw new Error('HTTP '+resp.status);
