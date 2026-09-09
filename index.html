@@ -460,7 +460,6 @@ function autoCorrectPts(i, ded, score) {
   if (!ded || typeof ded !== 'object') return ded;
   var expected = 200 - (score || 0);
   var keys = Object.keys(ded);
-  // Fix ok=true with pts_perdidos > 0
   keys.forEach(function(k) {
     if (ded[k].ok === true && (ded[k].pts_perdidos || 0) > 0) {
       ded[k] = Object.assign({}, ded[k], {pts_perdidos: 0});
@@ -670,14 +669,20 @@ function buildPrompts(txt, tema) {
 }
 
 function repairJson(raw) {
-  var match = raw.match(/\{[\s\S]*/);
-  if (!match) return null;
-  var s = match[0];
+  if (!raw) return null;
+  raw = raw.replace(/```json/gi, '').replace(/```/g, '');
+  var start = raw.indexOf('{');
+  if (start === -1) return null;
+  var s = raw.slice(start);
+  var depth = 0, endIdx = -1;
+  for (var i = 0; i < s.length; i++) {
+    if (s[i] === '{') depth++;
+    else if (s[i] === '}') { depth--; if (depth === 0) { endIdx = i; break; } }
+  }
+  if (endIdx !== -1) s = s.slice(0, endIdx + 1);
   try { return JSON.parse(s); } catch(e){}
-  // close open strings
   var qc = (s.match(/(?<!\\)"/g)||[]).length;
   if (qc % 2 !== 0) s += '"';
-  // close open brackets/braces
   var stack = [];
   for (var ci=0; ci<s.length; ci++) {
     if (s[ci]==='{') stack.push('}');
@@ -730,8 +735,8 @@ async function startCorrection() {
         var resp = await fetch(cfg.apiUrl, {
           method:'POST',
           headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'true'},
-          body:JSON.stringify({model:cfg.model,messages:[{role:'system',content:prompts[i-1]},{role:'user',content:txt}],temperature:cfg.temp,max_tokens:maxTok}),
-          signal:AbortSignal.timeout(120000)
+          body:JSON.stringify({model:cfg.model,messages:[{role:'system',content:prompts[i-1]},{role:'user',content:txt}],temperature:cfg.temp,max_tokens:maxTok,response_format:{type:"json_object"}}),
+          signal:AbortSignal.timeout(240000)
         });
         if (!resp.ok) {
           var errBody = await resp.text();
@@ -747,7 +752,6 @@ async function startCorrection() {
         var parsed = repairJson(raw);
         if (!parsed) throw new Error('JSON invalido mesmo apos reparo');
 
-        // auto-correct
         var dedKey = 'c'+i+'_ded', scoreKey = 'c'+i+'_score';
         if (parsed[dedKey] && typeof parsed[dedKey]==='object') {
           parsed[dedKey] = autoCorrectPts(i, parsed[dedKey], parsed[scoreKey]);
@@ -759,7 +763,6 @@ async function startCorrection() {
         if (ps){ps.textContent=parsed['c'+i+'_score'];ps.classList.add('visible')}
         log('C'+i+' - OK nota='+parsed['c'+i+'_score']);
 
-        // feedback
         try {
           setP((i-1)*20+10,'C'+i+' - buscando feedback...');
           var sp2 = 'Voce eh corretor do ENEM.'+(tema?'\nTema: "'+tema+'"':'')+'\nPara a Competencia '+i+', nota '+(parsed['c'+i+'_score']||0)+'/200.\nEscreva dois textos curtos (max 2 frases cada).\nRetorne SOMENTE JSON: {"c'+i+'_pos":"...","c'+i+'_imp":"..."}';
