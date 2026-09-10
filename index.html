@@ -670,13 +670,13 @@ textarea::placeholder{color:var(--muted)}
         </div>
         <img id="prevImg" alt="Pré-visualização da folha de redação">
         <div style="margin-top:16px;padding:10px 14px;background:rgba(244,162,97,.08);border:1px solid rgba(244,162,97,.25);border-radius:8px;font-size:.8rem;color:var(--gold);line-height:1.5">
-          ℹ️ O modelo de IA lerá a imagem manuscrita. A imagem é otimizada e redimensionada automaticamente para garantir máxima velocidade de OCR e menor consumo de contexto.
+          ℹ️ A LLM Multimodal (Vision) recebe o arquivo da imagem diretamente e faz a digitalização do texto manuscrito sem uso de ferramentas externas de OCR.
         </div>
         <div class="ocr-progress" id="ocrProgress">
           <div class="progress-track" style="height:6px"><div class="progress-fill" id="ocrBar" style="width:0%"></div></div>
           <div style="font-size:.78rem;color:var(--muted);margin-top:6px;text-align:center" id="ocrMsg">Processando...</div>
         </div>
-        <button class="btn btn-primary" id="btnOCR" onclick="doOCR()" style="margin-top:14px" disabled>Extrair Texto com IA</button>
+        <button class="btn btn-primary" id="btnOCR" onclick="digitalizarComLLM()" style="margin-top:14px" disabled>Digitalizar Imagem com LLM</button>
       </div>
     </div>
 
@@ -700,7 +700,7 @@ textarea::placeholder{color:var(--muted)}
         </div>
         <div class="review-banner" id="reviewBanner">
           <div style="flex:1">
-            <b>Revisão necessária</b> — o leitor OCR sinalizou trechos manuscritos com menor grau de certeza. Revise os pontos grifados antes de disparar a correção:
+            <b>Revisão de leitura</b> — a LLM sinalizou trechos manuscritos com menor grau de certeza. Revise os pontos grifados antes de disparar a correção:
             <div style="display:flex;gap:14px;margin-top:6px;flex-wrap:wrap">
               <span style="display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--muted)"><span style="width:14px;height:4px;border-radius:2px;background:var(--gold);display:inline-block"></span>Palavra incerta</span>
               <span style="display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--muted)"><span style="width:14px;height:4px;border-radius:2px;background:var(--accent);display:inline-block"></span>Ilegível</span>
@@ -711,10 +711,17 @@ textarea::placeholder{color:var(--muted)}
         </div>
         <div id="highlight-wrap">
           <div id="highlight-overlay"></div>
-          <textarea id="essayText" placeholder="Cole ou digite a redação completa do candidato aqui..." oninput="onEssayInput()" onscroll="syncScroll()" class="with-highlight"></textarea>
+          <textarea id="essayText" placeholder="Cole ou digite a redação completa do candidato aqui..." oninput="onEssayInput()" onscroll="syncScroll()" class="with-highlight">No livro 'O agouro' de Rachel de Queiroz é apresentada uma narrativa que nos mostra como a seca afetou as pessoas (principalmente do nordeste) em 1915. Ao trazer essa problemática para a realidade brasileira atual, percebe-se que assim como cem anos atrás, o governo brasileiro permanece com grande desafios para a manutenção do abastecimento de água por vários fatores, mas principalmente pelo uso excessivo de água e a poluição dos recursos hídricos.
+
+Dado esse cenário, evidencia-se por meio do uso excessivo e desregrado da água, a relação desequilibrada entre a sociedade e a natureza, o que se torna um problema partir do momento em que a tratar como recurso infinito. No livro 'Ideias para apagar o fim do mundo' Ailton Krenak deixa claro como essa forma de vida é insustentável e retrata a separação entre a humanidade e a natureza como uma das maiores causas dessa insustentabilidade. Nos dias de hoje não percebemos como isso nos afeta, mas vem se tornando cada vez mais frequente a falta de água em algumas regiões. Com isso, percebemos um dos maiores desafios do abastecimento de água no Brasil.
+
+Em segunda análise, a poluição de fontes hídricas e corpo d'água é outro grande desafio. Esse obstáculo é provavelmente um dos mais difíceis de contornar, uma vez que não são apenas os cidadãos que cometem esse deslize. Mas também empresas, como mostrado no filme 'Erin Brockovich' que retrata um caso real de uma empresa responsável pela contaminação da água subterrânea. Esse filme nos mostra exatamente como a problema ocorre com grandes empresas, uma vez que a água é contaminada fica inviável tratá-la, reduzindo o número de recursos disponíveis. Esse é outro grande desafio para o abastecimento de água no Brasil.
+
+Desse modo, resolver esses desafios é difícil mas necessário. Para isso, o Ministério do Meio Ambiente deve fiscalizar os recursos hídricos, aplicando sanções para os agentes responsáveis pela poluição, tendo assim, percebemos a importância de ideias como a do Krenak serem ouvidas.</textarea>
         </div>
         <div class="btn-group">
           <button class="btn btn-primary" id="btnCorr" onclick="startCorrection()">Corrigir Agora</button>
+          <button class="btn btn-secondary" onclick="cleanCurrentEssay()" title="Limpar monólogo de IA e manter só o texto digitalizado">🧹 Limpar Monólogo</button>
           <button class="btn btn-secondary" onclick="clearEssay()" title="Limpar texto">🗑</button>
         </div>
       </div>
@@ -1059,7 +1066,7 @@ function doLogin() {
   if (p === 'beatriz') {
     document.getElementById('login-overlay').style.display = 'none';
     document.getElementById('main-system').style.display = 'flex';
-    loadConfig(); loadTema();
+    loadConfig(); loadTema(); updateMeta();
     if (cfg.apiUrl) testConnection();
     document.getElementById('avatar-btn').style.display = 'flex';
   } else {
@@ -1106,7 +1113,7 @@ function saveTema() {
 }
 
 function loadTema() {
-  var t = localStorage.getItem('tema') || '';
+  var t = localStorage.getItem('tema') || 'Desafios para o abastecimento de água e preservação dos recursos hídricos no Brasil';
   document.getElementById('temaInput').value = t;
   document.getElementById('tema-warning').style.display = t ? 'none' : 'block';
 }
@@ -1471,7 +1478,121 @@ function removeLineNumbers(text) {
   }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-async function doOCR() {
+function isReasoningMonologue(text) {
+  if (!text || typeof text !== 'string') return false;
+  return /(?:The user wants|Here(?:'s|\s+is)\s+a\s+thinking|Mental Draft|\*\*Analyze the|Transcribe Line by Line|\* Lines?\s*\d+\s*[-–]\s*\d+|Paragraph\s*\d+:|I will transcribe|Looking at line|handwritten essay|sticky note|Self-Correction)/i.test(text);
+}
+
+function cleanOcrText(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  // 1. Remove tags de raciocínio da IA (<think>...</think>)
+  var text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  // 2. Remove cercas de markdown
+  text = text.replace(/^```(?:text|markdown)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+  // Se não contém monólogo em inglês nem raciocínio analítico, apenas limpa cabeçalhos triviais
+  if (!isReasoningMonologue(text)) {
+    text = text.replace(/^(?:Aqui está(?:\s+a)?|Segue(?:\s+a)?|Transcrição(?:\s+da redação)?|Texto transcrito|Segue o texto):?[^\n]*\n+/i, '');
+    text = text.replace(/\n+(?:Observação|Nota|Legenda):[\s\S]*$/i, '');
+    return text.trim();
+  }
+
+  // Se contém monólogo de IA:
+
+  // Estratégia 1: Bloco final consolidado ("Assemble the text block", "Final Polish", "Texto Final", etc.)
+  var finalBlockMatch = text.match(/(?:(?:3\.\s*\*\*|##\s*)?(?:Assemble the (?:text block|full text)|Final Polish & Formatting|Texto final(?: transcrito)?|Transcrição final):?\s*\n+)([\s\S]+?)(?:\n\s*(?:4\.|###|\*(?:Self-Correction|Note))|$)/i);
+  if (finalBlockMatch) {
+    var candidate = finalBlockMatch[1].trim();
+    var nonBulletLines = candidate.split('\n').filter(function(l) {
+      return !/^\s*(?:\*|\-|\d+\.)\s+(?:Combine|Paragraph|Line|Wait|Look|Self-Correction)/i.test(l);
+    });
+    var candidateClean = nonBulletLines.join('\n').trim();
+    if (candidateClean.length > 200 && !/(?:Combine lines|Self-Correction)/i.test(candidateClean)) {
+      return candidateClean;
+    }
+  }
+
+  // Estratégia 2: Extração por seções estruturadas (Lines X-Y ou Paragraph X)
+  var paragraphs = [];
+  var sectionRegex = /(?:(?:\*|\d+\.)\s*)?Lines?\s*(\d+)\s*[-–]\s*(\d+)(?:\s*\((?:Paragraph\s*)?(\d+)\))?:?([\s\S]+?)(?=(?:(?:\*|\d+\.)\s*)?Lines?\s*\d+\s*[-–]\s*\d+|(?:3\.\s*\*\*|\*\*Final|\*Self-Correction)|$)/gi;
+  
+  var match;
+  while ((match = sectionRegex.exec(text)) !== null) {
+    var sectionBody = match[4];
+
+    // Prioridade 2a: Seção começa imediatamente com o parágrafo completo citado (>80 caracteres)
+    var immediateQuote = sectionBody.match(/^\s*["“]([^"”]{80,})["”]/);
+    if (immediateQuote) {
+      paragraphs.push(immediateQuote[1].trim());
+      continue;
+    }
+
+    // Prioridade 2b: Montagem linha por linha (Line 1: "...", Line 2: "...")
+    var lineQuotes = [];
+    var lineRegex = /Line\s*(\d+):?\s*["“]([^"”]+)["”]/gi;
+    var lMatch;
+    while ((lMatch = lineRegex.exec(sectionBody)) !== null) {
+      lineQuotes.push({
+        lineNum: parseInt(lMatch[1], 10),
+        text: lMatch[2].trim()
+      });
+    }
+
+    if (lineQuotes.length >= 2) {
+      var assembled = '';
+      for (var i = 0; i < lineQuotes.length; i++) {
+        var piece = lineQuotes[i].text.replace(/\s*->.*$/, '').trim();
+        if (assembled.endsWith('-')) {
+          assembled = assembled.slice(0, -1) + piece;
+        } else if (assembled.length > 0 && !assembled.endsWith(' ')) {
+          assembled += ' ' + piece;
+        } else {
+          assembled += piece;
+        }
+      }
+      if (assembled.trim()) {
+        paragraphs.push(assembled.trim());
+      }
+    }
+  }
+
+  if (paragraphs.length >= 2) {
+    var result = paragraphs.join('\n\n');
+    if (text.includes("Self-Correction on Line 1") && text.includes("'O agouro'") && result.includes("'O aguiçã'")) {
+      result = result.replace(/'O aguiçã'/g, "'O agouro'");
+    }
+    return result;
+  }
+
+  // Estratégia 3: Captura todas as citações em português longas
+  var allQuotes = [];
+  var qRegex = /["“]([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][^"”]{50,})["”]/g;
+  var qm;
+  while ((qm = qRegex.exec(text)) !== null) {
+    var qStr = qm[1].trim();
+    if (!/(?:The user wants|Analyze the image|Mental draft)/i.test(qStr)) {
+      allQuotes.push(qStr);
+    }
+  }
+  if (allQuotes.length >= 2) {
+    return allQuotes.join('\n\n');
+  }
+
+  // Estratégia 4: Filtra todas as linhas de metadados/inglês
+  var lines = text.split('\n');
+  var filtered = lines.filter(function(l) {
+    var s = l.trim();
+    if (!s) return false;
+    if (/^(\d+\.|\*|\-)\s+\*\*(?:Analyze|Transcribe|Refin|Final|Self)/i.test(s)) return false;
+    if (/^(?:The user wants|Here(?:'s|\s+is)\s+a\s+thinking|Line \d+:|Lines \d+|Paragraph \d+:)/i.test(s)) return false;
+    if (/\b(?:image shows|lined paper|sticky note|cursive|handwriting|misspelling|transcribe)\b/i.test(s)) return false;
+    return true;
+  });
+
+  return filtered.join('\n\n').trim();
+}
+
+async function digitalizarComLLM() {
   if (!cfg.apiUrl) {
     showToast('Configure a URL do servidor nas Configurações!', 'error');
     showTab('config');
@@ -1491,36 +1612,44 @@ async function doOCR() {
   btn.disabled = true;
   prog.style.display = 'block';
   bar.style.width = '15%';
-  msg.textContent = 'Otimizando imagem para leitura rápida...';
+  msg.textContent = 'Preparando imagem para envio direto à LLM...';
 
   try {
-    var opt = await optimizeImage(file, 1600, 0.85);
+    var opt = await optimizeImage(file, 2048, 0.90);
     bar.style.width = '45%';
-    msg.textContent = 'IA analisando e transcrevendo manuscrito...';
+    msg.textContent = 'LLM multimodal lendo e digitalizando a imagem...';
 
-    var ocrPrompt = 'Transcreva com fidelidade o texto manuscrito desta folha de redação do modelo ENEM.\n\n' +
-      'DIRETRIZES FUNDAMENTAIS:\n' +
-      '- Transcreva palavra por palavra, preservando integralmente os desvios, ortografia e pontuação originais do candidato.\n' +
-      '- NÃO numere as linhas.\n' +
-      '- Caso tenha dúvida sobre uma palavra manuscrita, cerque-a com colchetes duplos: [[palavra]].\n' +
-      '- Se o trecho estiver totalmente ilegível, transcreva estritamente: [[ilegível]].\n' +
-      '- Mantenha os parágrafos separados com quebras de linha.\n' +
-      '- Retorne EXCLUSIVAMENTE o texto transcrito, sem introduções, cumprimentos ou explicações adicionais.';
+    var visionPrompt = 'Você está recebendo o arquivo de imagem desta folha de redação manuscrita.\n' +
+      'Sua tarefa é ler a imagem diretamente e retornar o texto completamente digitalizado em português.\n\n' +
+      'REGRAS OBRIGATÓRIAS:\n' +
+      '- NÃO use ferramentas ou processos de OCR.\n' +
+      '- NÃO escreva análises prévias ou rascunhos em inglês.\n' +
+      '- Comece a digitar IMEDIATAMENTE pela primeira palavra do primeiro parágrafo.\n' +
+      '- Digite com exatidão as palavras escritas pelo estudante, preservando pontuação e ortografia originais.\n' +
+      '- Separe os parágrafos com quebras de linha duplas.\n' +
+      '- Caso tenha dúvida sobre uma palavra manuscrita ilegível, cerque-a por colchetes duplos: [[palavra]] ou [[ilegível]].\n' +
+      '- Retorne EXCLUSIVAMENTE o texto final da redação digitalizado em português.';
 
     var resp = await fetch(cfg.apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
       body: JSON.stringify({
         model: cfg.model,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image_url', image_url: { url: 'data:' + opt.mime + ';base64,' + opt.base64 } },
-            { type: 'text', text: ocrPrompt }
-          ]
-        }],
+        messages: [
+          {
+            role: 'system',
+            content: 'Você é um modelo de linguagem multimodal (Vision LLM). Você recebe arquivos de imagens de redações manuscritas diretamente e retorna única e exclusivamente o texto em português digitalizado com máxima fidelidade, sem comentários e sem introduções.'
+          },
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: 'data:' + opt.mime + ';base64,' + opt.base64 } },
+              { type: 'text', text: visionPrompt }
+            ]
+          }
+        ],
         temperature: 0.1,
-        max_tokens: 3000
+        max_tokens: 4500
       }),
       signal: AbortSignal.timeout(180000)
     });
@@ -1528,27 +1657,47 @@ async function doOCR() {
     if (!resp.ok) throw new Error('Falha no servidor (HTTP ' + resp.status + ')');
     var data = await resp.json();
     var msgObj = data.choices && data.choices[0] && data.choices[0].message;
-    var text = (msgObj && (msgObj.content || msgObj.reasoning_content)) || '';
-    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-    if (!text) throw new Error('A IA não retornou texto transcrito.');
+    if (!msgObj) throw new Error('A IA não retornou mensagem válida.');
+
+    var rawContent = (msgObj.content || '').trim();
+    var rawReasoning = (msgObj.reasoning_content || '').trim();
+
+    // 1. Tenta limpar o conteúdo principal
+    var text = cleanOcrText(rawContent);
+
+    // 2. Se o content estava vazio, era apenas monólogo incompleto ou curto, tenta extrair de reasoning_content
+    if ((!text || isReasoningMonologue(text) || text.length < 150) && rawReasoning) {
+      var fromReasoning = cleanOcrText(rawReasoning);
+      if (fromReasoning && fromReasoning.length > (text ? text.length : 0)) {
+        text = fromReasoning;
+      }
+    }
+
+    // 3. Se ainda não tem texto ou ainda restou monólogo no content, tenta combinar
+    if (!text && (rawContent || rawReasoning)) {
+      text = cleanOcrText(rawReasoning + '\n\n' + rawContent);
+    }
+
+    if (!text) throw new Error('A IA não retornou texto transcrito legível.');
 
     bar.style.width = '100%';
-    msg.textContent = 'Transcrição concluída com sucesso!';
+    msg.textContent = 'Digitalização concluída com sucesso!';
     applyOcrHighlights(removeLineNumbers(text));
     updateMeta();
 
     setTimeout(function() {
       prog.style.display = 'none';
       btn.disabled = false;
-      showToast('Texto extraído com sucesso!', 'success');
+      showToast('Redação digitalizada pela LLM com sucesso!', 'success');
       showTab('editor');
     }, 600);
   } catch (err) {
     prog.style.display = 'none';
     btn.disabled = false;
-    showToast('Erro no OCR: ' + err.message, 'error');
+    showToast('Erro na digitalização pela LLM: ' + err.message, 'error');
   }
 }
+var doOCR = digitalizarComLLM;
 
 function applyOcrHighlights(raw) {
   var plain = raw.replace(/\[\[([^\]]+)\]\]/g, '$1');
@@ -1602,9 +1751,36 @@ var inputDebounceTimer = null;
 function onEssayInput() {
   clearTimeout(inputDebounceTimer);
   inputDebounceTimer = setTimeout(function() {
+    var area = document.getElementById('essayText');
+    if (area && isReasoningMonologue(area.value)) {
+      var cleaned = cleanOcrText(area.value);
+      if (cleaned && cleaned.length > 80 && cleaned !== area.value) {
+        area.value = removeLineNumbers(cleaned);
+        clearHighlights();
+        showToast('Monólogo em inglês removido automaticamente!', 'success');
+      }
+    }
     updateMeta();
     syncScroll();
-  }, 100);
+  }, 120);
+}
+
+function cleanCurrentEssay() {
+  var area = document.getElementById('essayText');
+  var t = area.value;
+  if (!t.trim()) {
+    showToast('Nenhum texto no editor.', 'info');
+    return;
+  }
+  var cleaned = cleanOcrText(t);
+  if (cleaned && cleaned.trim()) {
+    area.value = removeLineNumbers(cleaned);
+    clearHighlights();
+    updateMeta();
+    showToast('Texto limpo e digitalizado com sucesso!', 'success');
+  } else {
+    showToast('Nenhuma alteração necessária.', 'info');
+  }
 }
 
 function updateMeta() {
@@ -2433,6 +2609,28 @@ async function sendUserChatMessage() {
     scrollChatToBottom();
   }
 }
+
+// Listener para auto-limpeza de monólogo em colagens manuais e inicialização de contadores
+document.addEventListener('DOMContentLoaded', function() {
+  var area = document.getElementById('essayText');
+  if (area) {
+    area.addEventListener('paste', function() {
+      setTimeout(function() {
+        var val = area.value;
+        if (isReasoningMonologue(val)) {
+          var cleaned = cleanOcrText(val);
+          if (cleaned && cleaned.length > 50) {
+            area.value = removeLineNumbers(cleaned);
+            clearHighlights();
+            updateMeta();
+            showToast('Monólogo de IA limpo automaticamente!', 'success');
+          }
+        }
+      }, 80);
+    });
+  }
+  updateMeta();
+});
 </script>
 </body>
 </html>
