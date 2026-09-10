@@ -137,7 +137,23 @@ main{flex:1;overflow-y:auto;padding:24px}
 .upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer}
 .upload-text{color:var(--muted);font-size:.9rem}
 .upload-text span{color:var(--accent);font-weight:600}
-#prevImg{max-width:100%;border-radius:var(--radius);margin:16px 0;border:1px solid var(--border);display:none}
+#prevImg{max-width:100%;border-radius:var(--radius);margin:0 auto;display:block;user-select:none;pointer-events:none}
+.crop-stage{width:100%;overflow:hidden;border-radius:var(--radius);border:1px solid var(--border);background:#07070d;margin:12px 0;text-align:center;position:relative}
+.crop-container{position:relative;display:inline-block;max-width:100%;user-select:none;touch-action:none;line-height:0}
+.crop-shade{position:absolute;background:rgba(0,0,0,0.65);pointer-events:none;z-index:10;transition:background .2s}
+[data-theme="light"] .crop-shade{background:rgba(15,23,42,0.55)}
+.crop-box{position:absolute;border:2px solid var(--accent);box-shadow:0 0 0 1px rgba(255,255,255,.5),0 4px 20px rgba(230,57,70,.35);cursor:move;z-index:20;box-sizing:border-box}
+.crop-box::after{content:'';position:absolute;inset:0;background:rgba(230,57,70,0.03);pointer-events:none}
+.crop-badge{position:absolute;top:6px;left:6px;background:var(--accent);color:#fff;font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:4px;pointer-events:none;letter-spacing:.3px;box-shadow:0 2px 6px rgba(0,0,0,.4);line-height:1.2}
+.crop-handle{position:absolute;width:12px;height:12px;background:#fff;border:2px solid var(--accent);border-radius:2px;z-index:30;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.crop-handle.handle-tl{top:-6px;left:-6px;cursor:nwse-resize}
+.crop-handle.handle-tr{top:-6px;right:-6px;cursor:nesw-resize}
+.crop-handle.handle-bl{bottom:-6px;left:-6px;cursor:nesw-resize}
+.crop-handle.handle-br{bottom:-6px;right:-6px;cursor:nwse-resize}
+.crop-handle.handle-t{top:-6px;left:50%;transform:translateX(-50%);cursor:ns-resize;width:24px;height:7px}
+.crop-handle.handle-b{bottom:-6px;left:50%;transform:translateX(-50%);cursor:ns-resize;width:24px;height:7px}
+.crop-handle.handle-l{top:50%;left:-6px;transform:translateY(-50%);cursor:ew-resize;width:7px;height:24px}
+.crop-handle.handle-r{top:50%;right:-6px;transform:translateY(-50%);cursor:ew-resize;width:7px;height:24px}
 .ocr-progress{display:none;margin-top:12px}
 
 .editor-meta{display:flex;gap:12px;margin-bottom:12px;font-size:.8rem;color:var(--muted);flex-wrap:wrap}
@@ -668,15 +684,51 @@ textarea::placeholder{color:var(--muted)}
           <div class="upload-text">Arraste uma imagem ou <span>clique para selecionar</span></div>
           <div style="font-size:.78rem;color:var(--muted);margin-top:6px">PNG, JPG, WEBP (Otimização automática ativada)</div>
         </div>
-        <img id="prevImg" alt="Pré-visualização da folha de redação">
+        <!-- Seletor Interativo da Área da Redação (Crop Visual) -->
+        <div id="cropWrapper" style="display:none;margin-top:18px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <div>
+              <span style="font-weight:700;font-size:.9rem;color:var(--text)">✂️ Seleção da Área da Redação</span>
+              <span style="font-size:.78rem;color:var(--muted);margin-left:6px">(Apenas o texto demarcado será enviado à LLM)</span>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button type="button" class="btn btn-secondary" onclick="setCropPreset('body')" style="padding:6px 12px;font-size:.78rem" title="Remove cabeçalho e margens">🎯 Focar Texto (Linhas 1-30)</button>
+              <button type="button" class="btn btn-secondary" onclick="setCropPreset('full')" style="padding:6px 12px;font-size:.78rem" title="Selecionar folha inteira">🔄 Imagem Completa</button>
+            </div>
+          </div>
+          <div class="crop-stage" id="cropStage">
+            <div id="cropContainer" class="crop-container">
+              <img id="prevImg" alt="Folha de redação para digitalização">
+              <div id="cropShadeTop" class="crop-shade"></div>
+              <div id="cropShadeBottom" class="crop-shade"></div>
+              <div id="cropShadeLeft" class="crop-shade"></div>
+              <div id="cropShadeRight" class="crop-shade"></div>
+              <div id="cropBox" class="crop-box">
+                <div class="crop-badge" id="cropBadge">Área da Redação</div>
+                <div class="crop-handle handle-tl" data-dir="tl"></div>
+                <div class="crop-handle handle-tr" data-dir="tr"></div>
+                <div class="crop-handle handle-bl" data-dir="bl"></div>
+                <div class="crop-handle handle-br" data-dir="br"></div>
+                <div class="crop-handle handle-t" data-dir="t"></div>
+                <div class="crop-handle handle-b" data-dir="b"></div>
+                <div class="crop-handle handle-l" data-dir="l"></div>
+                <div class="crop-handle handle-r" data-dir="r"></div>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:.78rem;color:var(--muted);flex-wrap:wrap;gap:6px">
+            <span>💡 <i>Arraste a caixa ou alças para focar somente nas linhas da redação. Cabeçalho e dados pessoais são descartados.</i></span>
+            <span id="cropCoordsLabel" style="color:var(--success);font-weight:600">✓ Recorte ativo</span>
+          </div>
+        </div>
         <div style="margin-top:16px;padding:10px 14px;background:rgba(244,162,97,.08);border:1px solid rgba(244,162,97,.25);border-radius:8px;font-size:.8rem;color:var(--gold);line-height:1.5">
-          ℹ️ A LLM Multimodal (Vision) recebe o arquivo da imagem diretamente e faz a digitalização do texto manuscrito sem uso de ferramentas externas de OCR.
+          ℹ️ A LLM Multimodal (Vision) recebe apenas a área recortada da redação, economizando tokens e eliminando ruídos de cabeçalho e margens.
         </div>
         <div class="ocr-progress" id="ocrProgress">
           <div class="progress-track" style="height:6px"><div class="progress-fill" id="ocrBar" style="width:0%"></div></div>
           <div style="font-size:.78rem;color:var(--muted);margin-top:6px;text-align:center" id="ocrMsg">Processando...</div>
         </div>
-        <button class="btn btn-primary" id="btnOCR" onclick="digitalizarComLLM()" style="margin-top:14px" disabled>Digitalizar Imagem com LLM</button>
+        <button class="btn btn-primary" id="btnOCR" onclick="digitalizarComLLM()" style="margin-top:14px" disabled>Digitalizar Área Selecionada com LLM</button>
       </div>
     </div>
 
@@ -1424,45 +1476,245 @@ function printReport() {
   window.print();
 }
 
+// Variáveis e Controle do Recorte Interativo da Redação (Crop Visual)
+var cropNorm = { x: 0.04, y: 0.13, w: 0.92, h: 0.83 };
+var isDraggingCrop = false;
+var activeCropHandle = null;
+var cropDragStart = { clientX: 0, clientY: 0, normX: 0, normY: 0, normW: 0, normH: 0, iw: 0, ih: 0 };
+var cropEventsInitialized = false;
+
 function previewImg(input) {
   var file = input.files[0];
   if (!file) return;
   var r = new FileReader();
   r.onload = function(e) {
     var img = document.getElementById('prevImg');
+    img.onload = function() {
+      document.getElementById('cropWrapper').style.display = 'block';
+      document.getElementById('btnOCR').disabled = false;
+      setCropPreset('body');
+      initCropEvents();
+    };
     img.src = e.target.result;
-    img.style.display = 'block';
-    document.getElementById('btnOCR').disabled = false;
   };
   r.readAsDataURL(file);
 }
 
-// Otimização de Imagem com Canvas (Reduz tráfego de rede e acelera o Vision LLM em até 10x)
-function optimizeImage(file, maxDim, quality) {
-  maxDim = maxDim || 1600;
-  quality = quality || 0.85;
+function setCropPreset(preset) {
+  if (preset === 'body') {
+    // Descarta automaticamente o cabeçalho (nome, tema no topo, post-it) e margens
+    cropNorm = { x: 0.04, y: 0.13, w: 0.92, h: 0.83 };
+  } else if (preset === 'full') {
+    cropNorm = { x: 0.0, y: 0.0, w: 1.0, h: 1.0 };
+  }
+  renderCropUI();
+}
+
+function renderCropUI() {
+  var img = document.getElementById('prevImg');
+  var box = document.getElementById('cropBox');
+  if (!img || !box || !img.clientWidth) return;
+
+  var iw = img.clientWidth;
+  var ih = img.clientHeight;
+  var il = img.offsetLeft;
+  var it = img.offsetTop;
+
+  var bx = Math.round(il + cropNorm.x * iw);
+  var by = Math.round(it + cropNorm.y * ih);
+  var bw = Math.round(cropNorm.w * iw);
+  var bh = Math.round(cropNorm.h * ih);
+
+  box.style.left = bx + 'px';
+  box.style.top = by + 'px';
+  box.style.width = bw + 'px';
+  box.style.height = bh + 'px';
+
+  // Sombreamento externo (4 quadrantes)
+  var sTop = document.getElementById('cropShadeTop');
+  var sBottom = document.getElementById('cropShadeBottom');
+  var sLeft = document.getElementById('cropShadeLeft');
+  var sRight = document.getElementById('cropShadeRight');
+
+  if (sTop) {
+    sTop.style.top = '0px';
+    sTop.style.left = il + 'px';
+    sTop.style.width = iw + 'px';
+    sTop.style.height = (by - it) + 'px';
+  }
+  if (sBottom) {
+    sBottom.style.top = (by + bh) + 'px';
+    sBottom.style.left = il + 'px';
+    sBottom.style.width = iw + 'px';
+    sBottom.style.height = Math.max(0, (it + ih) - (by + bh)) + 'px';
+  }
+  if (sLeft) {
+    sLeft.style.top = by + 'px';
+    sLeft.style.left = il + 'px';
+    sLeft.style.width = (bx - il) + 'px';
+    sLeft.style.height = bh + 'px';
+  }
+  if (sRight) {
+    sRight.style.top = by + 'px';
+    sRight.style.left = (bx + bw) + 'px';
+    sRight.style.width = Math.max(0, (il + iw) - (bx + bw)) + 'px';
+    sRight.style.height = bh + 'px';
+  }
+
+  var lbl = document.getElementById('cropCoordsLabel');
+  if (lbl) {
+    var pw = Math.round(cropNorm.w * 100);
+    var ph = Math.round(cropNorm.h * 100);
+    var semCabecalho = cropNorm.y >= 0.08 ? ' (Cabeçalho descartado)' : '';
+    lbl.textContent = '✓ Área: ' + pw + '% larg × ' + ph + '% alt' + semCabecalho;
+  }
+}
+
+function initCropEvents() {
+  if (cropEventsInitialized) {
+    renderCropUI();
+    return;
+  }
+  cropEventsInitialized = true;
+
+  var box = document.getElementById('cropBox');
+  if (!box) return;
+
+  box.addEventListener('pointerdown', function(e) {
+    var handle = e.target.closest('.crop-handle');
+    var img = document.getElementById('prevImg');
+    if (!img || !img.clientWidth) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    var iw = img.clientWidth, ih = img.clientHeight;
+
+    if (handle) {
+      activeCropHandle = handle.getAttribute('data-dir');
+    } else {
+      isDraggingCrop = true;
+    }
+
+    cropDragStart = {
+      clientX: e.clientX,
+      clientY: e.clientY,
+      normX: cropNorm.x,
+      normY: cropNorm.y,
+      normW: cropNorm.w,
+      normH: cropNorm.h,
+      iw: iw,
+      ih: ih
+    };
+
+    window.addEventListener('pointermove', onCropPointerMove);
+    window.addEventListener('pointerup', onCropPointerUp);
+  });
+
+  window.addEventListener('resize', function() {
+    renderCropUI();
+  });
+}
+
+function onCropPointerMove(e) {
+  if (!isDraggingCrop && !activeCropHandle) return;
+  e.preventDefault();
+
+  var dx = (e.clientX - cropDragStart.clientX) / cropDragStart.iw;
+  var dy = (e.clientY - cropDragStart.clientY) / cropDragStart.ih;
+
+  if (isDraggingCrop) {
+    var newX = Math.max(0, Math.min(1 - cropDragStart.normW, cropDragStart.normX + dx));
+    var newY = Math.max(0, Math.min(1 - cropDragStart.normH, cropDragStart.normY + dy));
+    cropNorm.x = newX;
+    cropNorm.y = newY;
+  } else if (activeCropHandle) {
+    var h = activeCropHandle;
+    var x = cropDragStart.normX;
+    var y = cropDragStart.normY;
+    var w = cropDragStart.normW;
+    var hgt = cropDragStart.normH;
+
+    if (h.includes('r')) {
+      w = Math.max(0.15, Math.min(1 - x, cropDragStart.normW + dx));
+    }
+    if (h.includes('b')) {
+      hgt = Math.max(0.15, Math.min(1 - y, cropDragStart.normH + dy));
+    }
+    if (h.includes('l')) {
+      var maxLeft = cropDragStart.normX + cropDragStart.normW - 0.15;
+      var newL = Math.max(0, Math.min(maxLeft, cropDragStart.normX + dx));
+      w = (cropDragStart.normX + cropDragStart.normW) - newL;
+      x = newL;
+    }
+    if (h.includes('t')) {
+      var maxTop = cropDragStart.normY + cropDragStart.normH - 0.15;
+      var newT = Math.max(0, Math.min(maxTop, cropDragStart.normY + dy));
+      hgt = (cropDragStart.normY + cropDragStart.normH) - newT;
+      y = newT;
+    }
+
+    cropNorm.x = x;
+    cropNorm.y = y;
+    cropNorm.w = w;
+    cropNorm.h = hgt;
+  }
+
+  renderCropUI();
+}
+
+function onCropPointerUp(e) {
+  isDraggingCrop = false;
+  activeCropHandle = null;
+  window.removeEventListener('pointermove', onCropPointerMove);
+  window.removeEventListener('pointerup', onCropPointerUp);
+}
+
+// Recorta estritamente a área da redação selecionada e otimiza para o envio à LLM
+function cropAndOptimizeImage(file, maxDim, quality) {
+  maxDim = maxDim || 2048;
+  quality = quality || 0.92;
   return new Promise(function(resolve, reject) {
     var reader = new FileReader();
     reader.onload = function(e) {
       var img = new Image();
       img.onload = function() {
-        var w = img.width, h = img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
-          } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
-          }
+        var nw = img.naturalWidth || img.width;
+        var nh = img.naturalHeight || img.height;
+
+        // Coordenadas calculadas na resolução nativa do arquivo
+        var sx = Math.max(0, Math.round(cropNorm.x * nw));
+        var sy = Math.max(0, Math.round(cropNorm.y * nh));
+        var sw = Math.min(nw - sx, Math.round(cropNorm.w * nw));
+        var sh = Math.min(nh - sy, Math.round(cropNorm.h * nh));
+
+        if (sw <= 0 || sh <= 0) {
+          sx = 0; sy = 0; sw = nw; sh = nh;
         }
+
+        // Redimensiona o recorte mantendo alta nitidez para a visão da LLM
+        var scale = Math.min(1, maxDim / Math.max(sw, sh));
+        var dw = Math.round(sw * scale);
+        var dh = Math.round(sh * scale);
+
         var canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
+        canvas.width = dw;
+        canvas.height = dh;
         var ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+
         var dataUrl = canvas.toDataURL('image/jpeg', quality);
-        resolve({ dataUrl: dataUrl, base64: dataUrl.split(',')[1], mime: 'image/jpeg' });
+        resolve({
+          dataUrl: dataUrl,
+          base64: dataUrl.split(',')[1],
+          mime: 'image/jpeg',
+          croppedWidth: dw,
+          croppedHeight: dh,
+          originalWidth: nw,
+          originalHeight: nh
+        });
       };
       img.onerror = reject;
       img.src = e.target.result;
@@ -1470,6 +1722,9 @@ function optimizeImage(file, maxDim, quality) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+function optimizeImage(file, maxDim, quality) {
+  return cropAndOptimizeImage(file, maxDim, quality);
 }
 
 function removeLineNumbers(text) {
@@ -1612,14 +1867,14 @@ async function digitalizarComLLM() {
   btn.disabled = true;
   prog.style.display = 'block';
   bar.style.width = '15%';
-  msg.textContent = 'Preparando imagem para envio direto à LLM...';
+  msg.textContent = 'Preparando recorte da redação...';
 
   try {
-    var opt = await optimizeImage(file, 2048, 0.90);
+    var opt = await cropAndOptimizeImage(file, 2048, 0.92);
     bar.style.width = '45%';
-    msg.textContent = 'LLM multimodal lendo e digitalizando a imagem...';
+    msg.textContent = 'Enviando somente a redação (' + opt.croppedWidth + '×' + opt.croppedHeight + ' px) para a LLM...';
 
-    var visionPrompt = 'Você está recebendo o arquivo de imagem desta folha de redação manuscrita.\n' +
+    var visionPrompt = 'Você está recebendo o arquivo com a imagem recortada estritamente contendo as linhas da redação manuscrita.\n' +
       'Sua tarefa é ler a imagem diretamente e retornar o texto completamente digitalizado em português.\n\n' +
       'REGRAS OBRIGATÓRIAS:\n' +
       '- NÃO use ferramentas ou processos de OCR.\n' +
