@@ -1026,9 +1026,15 @@ if (!localStorage.getItem('concurrency_user_customized') && (savedConcurrency ==
   localStorage.setItem('concurrency', '1');
 }
 
+var savedModel = localStorage.getItem('model');
+if (!savedModel || savedModel === 'local-model') {
+  savedModel = 'qwen3.6-27b-mtp';
+  localStorage.setItem('model', 'qwen3.6-27b-mtp');
+}
+
 var cfg = {
   apiUrl: localStorage.getItem('apiUrl') || 'https://effective-entourage-riverside.ngrok-free.dev/v1/chat/completions',
-  model:  localStorage.getItem('model')  || 'qwen3.6-27b-mtp',
+  model:  savedModel,
   temp:   parseFloat(localStorage.getItem('temp') || '0.1'),
   concurrency: parseInt(savedConcurrency || '1'),
   contextWindow: parseInt(localStorage.getItem('contextWindow') || '8192')
@@ -1063,6 +1069,10 @@ function doLogin() {
 }
 
 function loadConfig() {
+  if (!cfg.model || cfg.model === 'local-model') {
+    cfg.model = 'qwen3.6-27b-mtp';
+    localStorage.setItem('model', 'qwen3.6-27b-mtp');
+  }
   document.getElementById('apiUrlInput').value = cfg.apiUrl;
   document.getElementById('modelInput').value  = cfg.model;
   document.getElementById('tempInput').value   = cfg.temp;
@@ -1072,7 +1082,8 @@ function loadConfig() {
 
 function saveConfig() {
   cfg.apiUrl = document.getElementById('apiUrlInput').value.trim();
-  cfg.model  = document.getElementById('modelInput').value.trim() || 'qwen3.6-27b-mtp';
+  var chosenModel = document.getElementById('modelInput').value.trim();
+  cfg.model  = (!chosenModel || chosenModel === 'local-model') ? 'qwen3.6-27b-mtp' : chosenModel;
   cfg.temp   = parseFloat(document.getElementById('tempInput').value) || 0.1;
   cfg.concurrency = parseInt(document.getElementById('concurrencyInput').value) || 1;
   cfg.contextWindow = parseInt(document.getElementById('contextWindowInput').value) || 8192;
@@ -1118,8 +1129,6 @@ async function testConnection() {
       signal: AbortSignal.timeout(8000)
     });
     if (resp.ok) {
-      dot.className = 'status-dot online';
-      txt.textContent = 'Servidor online (' + cfg.model + ')';
       var d = await resp.json();
       if (d && d.data && Array.isArray(d.data)) {
         var dl = document.getElementById('modelsList');
@@ -1128,7 +1137,19 @@ async function testConnection() {
             return '<option value="' + m.id + '">';
           }).join('');
         }
+        var availableIds = d.data.map(function(m) { return m.id; });
+        if (cfg.model === 'local-model' || (!availableIds.includes(cfg.model) && availableIds.length > 0)) {
+          var preferred = availableIds.find(function(id) { return id.includes('qwen3.6-27b') || id.includes('27b'); }) || availableIds[0];
+          if (preferred) {
+            cfg.model = preferred;
+            localStorage.setItem('model', preferred);
+            var mi = document.getElementById('modelInput');
+            if (mi) mi.value = preferred;
+          }
+        }
       }
+      dot.className = 'status-dot online';
+      txt.textContent = 'Servidor online (' + cfg.model + ')';
     } else {
       dot.className = 'status-dot online';
       txt.textContent = 'Servidor conectado';
@@ -1612,13 +1633,15 @@ function buildPrompts(txt, tema) {
   var temaInfo = tema ? '\nTema oficial proposto: "' + tema + '"' : '';
   var calibracao = 'ESCALA DE NOTAS: 0 | 40 | 80 | 120 | 160 | 200\n' +
     '200 = sem falhas ou falha leve/excepcional | 160 = 1 desvio/falha relevante | 120 = 2-3 falhas | 80 = várias falhas | 40 = falha grave/precária | 0 = ausência total ou fuga';
-  var regraMatematica = 'REGRA MATEMÁTICA: O somatório de todos os pts_perdidos deve ser EXATAMENTE igual a (200 - score).\n' +
-    'REGRA OK: Se ok=true, então pts_perdidos=0 obrigatoriamente.\n' +
-    'REGRA EXEMPLOS: O campo exemplos é uma lista curta de trechos da redação (máx. 60 caracteres cada, máx. 3 itens). Sem falhas, utilize [].\n' +
-    'REGRA FEEDBACK QUALITATIVO: Forneça c{i}_pos (pontos fortes na competência, máx. 2 frases) e c{i}_imp (direcionamento claro de como alcançar 200 pontos, máx. 2 frases).';
+  var diretrizes = 'DIRETRIZES FUNDAMENTAIS:\n' +
+    '- Atribua a nota oficial da competência (0, 40, 80, 120, 160 ou 200) com base no nível global do texto.\n' +
+    '- Liste as falhas e trechos com exemplos curtos (máx. 50 caracteres cada, máx. 3 itens; se não houver falhas, use []).\n' +
+    '- Forneça c{i}_pos (pontos fortes, máx. 2 frases) e c{i}_imp (como melhorar, máx. 2 frases).\n' +
+    '- IMPORTANTE: Seja direto e conciso no raciocínio. Não faça cálculos manuais de soma de pontos (a plataforma normaliza isso automaticamente).\n' +
+    '- Retorne EXCLUSIVAMENTE o objeto JSON válido, sem texto conversacional antes ou depois.';
 
   var p1 = 'Você é corretor oficial do ENEM especialista na Competência I.' + temaInfo + '\n' +
-    calibracao + '\n' + regraMatematica + '\n\n' +
+    calibracao + '\n' + diretrizes + '\n\n' +
     'Avalie a Competência I — Domínio da modalidade escrita formal da língua portuguesa.\n\n' +
     'CONTAGEM DE FALHAS:\n' +
     '- falhas_sintaticas: truncamento, oração sem verbo principal, justaposição sem conectivo adequado.\n' +
@@ -1652,7 +1675,7 @@ function buildPrompts(txt, tema) {
     '}';
 
   var p2 = 'Você é corretor oficial do ENEM especialista na Competência II.' + temaInfo + '\n' +
-    calibracao + '\n' + regraMatematica + '\n\n' +
+    calibracao + '\n' + diretrizes + '\n\n' +
     'Avalie a Competência II — Compreensão do tema e aplicação de repertório sociocultural produtivo.\n\n' +
     'VERIFICAÇÕES:\n' +
     '- abordagem_tema: aborda o tema completo sem tangenciar?\n' +
@@ -1684,7 +1707,7 @@ function buildPrompts(txt, tema) {
     '}';
 
   var p3 = 'Você é corretor oficial do ENEM especialista na Competência III.' + temaInfo + '\n' +
-    calibracao + '\n' + regraMatematica + '\n\n' +
+    calibracao + '\n' + diretrizes + '\n\n' +
     'Avalie a Competência III — Projeto de texto e consistência dos argumentos.\n\n' +
     'VERIFICAÇÕES:\n' +
     '- tese_antecipacao: tese definida com antecipação dos argumentos na introdução?\n' +
@@ -1713,7 +1736,7 @@ function buildPrompts(txt, tema) {
     '}';
 
   var p4 = 'Você é corretor oficial do ENEM especialista na Competência IV.' + temaInfo + '\n' +
-    calibracao + '\n' + regraMatematica + '\n\n' +
+    calibracao + '\n' + diretrizes + '\n\n' +
     'Avalie a Competência IV — Coesão textual e mecanismos de articulação linguística.\n\n' +
     'CONTAGEM DE FALHAS:\n' +
     '- conectivos_inadequados: operadores ou conectivos utilizados em sentido inadequado à relação semântica.\n' +
@@ -1736,7 +1759,7 @@ function buildPrompts(txt, tema) {
     '}';
 
   var p5 = 'Você é corretor oficial do ENEM especialista na Competência V.' + temaInfo + '\n' +
-    calibracao + '\n' + regraMatematica + '\n\n' +
+    calibracao + '\n' + diretrizes + '\n\n' +
     'Avalie a Competência V — Proposta de intervenção social e direitos humanos.\n\n' +
     'IDENTIFIQUE OS 5 ELEMENTOS VÁLIDOS:\n' +
     '1. agente: quem executará a ação (especificado com clareza).\n' +
@@ -1808,6 +1831,11 @@ function repairJson(raw) {
     var sub = clean.slice(firstOpen).replace(/```(?:json)?/gi, '').trim();
     var qc = (sub.match(/(?<!\\)"/g) || []).length;
     if (qc % 2 !== 0) sub += '"';
+
+    // Remove pares chave-valor incompletos no final (ex: "campo": ou vírgulas órfãs)
+    sub = sub.replace(/,\s*"[^"]*"\s*:\s*$/, '');
+    sub = sub.replace(/"[^"]*"\s*:\s*$/, '');
+    sub = sub.replace(/,\s*$/, '');
 
     var stack = [];
     var inString = false;
@@ -1913,8 +1941,8 @@ async function startCorrection() {
     document.getElementById('progPct').textContent = pct + '%';
   }
 
-  // Token ladder seguro para modelos locais (mantém 4096 tokens para modelos de raciocínio, reduz apenas se o backend reportar HTTP 400 de limite de contexto)
-  var TOKEN_LADDER = [4096, 4096, 4096];
+  // Token ladder seguro para modelos locais (mantém 6144 tokens para modelos de raciocínio, reduz apenas se o backend reportar HTTP 400 de limite de contexto)
+  var TOKEN_LADDER = [6144, 6144, 4096];
   var completedCount = 0;
   var failedComps = [];
 
