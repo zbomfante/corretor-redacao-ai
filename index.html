@@ -918,12 +918,12 @@ textarea::placeholder{color:var(--muted)}
         <div style="margin-bottom:20px">
           <div class="field-label">Concorrência de Avaliação (Eficiência)</div>
           <div class="api-config">
-            <select id="concurrencyInput" style="max-width:280px">
-              <option value="1">1 - Sequencial (Seguro para 1 slot / GPU modesta)</option>
-              <option value="2" selected>2 - Paralelo Moderado (Mais rápido e seguro)</option>
-              <option value="5">5 - Paralelo Total (Ultrarrápido para vLLM)</option>
+            <select id="concurrencyInput" style="max-width:320px">
+              <option value="1" selected>1 — Sequencial (Recomendado: Seguro, sem fila e sem timeout)</option>
+              <option value="2">2 — Paralelo Moderado (Exige 2+ slots/VRAM alta na GPU)</option>
+              <option value="5">5 — Paralelo Total (Ultrarrápido para clusters vLLM)</option>
             </select>
-            <span style="font-size:.8rem;color:var(--muted)">Acelera em até 3x o tempo total de resposta</span>
+            <span style="font-size:.8rem;color:var(--muted)">Use 1 para evitar sobrecarga e timeout em GPUs locais</span>
           </div>
         </div>
         <div style="margin-bottom:20px">
@@ -1019,11 +1019,18 @@ function toggleTheme() {
 applyTheme(getSavedTheme());
 
 // Configuração do Sistema
+var savedConcurrency = localStorage.getItem('concurrency');
+// Se o valor salvo anteriormente era 2 herdado do default antigo, reajusta para 1 (modo sequencial estável)
+if (!localStorage.getItem('concurrency_user_customized') && (savedConcurrency === '2' || !savedConcurrency)) {
+  savedConcurrency = '1';
+  localStorage.setItem('concurrency', '1');
+}
+
 var cfg = {
   apiUrl: localStorage.getItem('apiUrl') || 'https://effective-entourage-riverside.ngrok-free.dev/v1/chat/completions',
   model:  localStorage.getItem('model')  || 'qwen3.6-27b-mtp',
   temp:   parseFloat(localStorage.getItem('temp') || '0.1'),
-  concurrency: parseInt(localStorage.getItem('concurrency') || '2'),
+  concurrency: parseInt(savedConcurrency || '1'),
   contextWindow: parseInt(localStorage.getItem('contextWindow') || '8192')
 };
 
@@ -1059,21 +1066,22 @@ function loadConfig() {
   document.getElementById('apiUrlInput').value = cfg.apiUrl;
   document.getElementById('modelInput').value  = cfg.model;
   document.getElementById('tempInput').value   = cfg.temp;
-  document.getElementById('concurrencyInput').value = cfg.concurrency || 2;
+  document.getElementById('concurrencyInput').value = cfg.concurrency || 1;
   document.getElementById('contextWindowInput').value = cfg.contextWindow || 8192;
 }
 
 function saveConfig() {
   cfg.apiUrl = document.getElementById('apiUrlInput').value.trim();
-  cfg.model  = document.getElementById('modelInput').value.trim() || 'local-model';
+  cfg.model  = document.getElementById('modelInput').value.trim() || 'qwen3.6-27b-mtp';
   cfg.temp   = parseFloat(document.getElementById('tempInput').value) || 0.1;
-  cfg.concurrency = parseInt(document.getElementById('concurrencyInput').value) || 2;
+  cfg.concurrency = parseInt(document.getElementById('concurrencyInput').value) || 1;
   cfg.contextWindow = parseInt(document.getElementById('contextWindowInput').value) || 8192;
 
   localStorage.setItem('apiUrl', cfg.apiUrl);
   localStorage.setItem('model',  cfg.model);
   localStorage.setItem('temp',   cfg.temp);
   localStorage.setItem('concurrency', cfg.concurrency);
+  localStorage.setItem('concurrency_user_customized', 'true');
   localStorage.setItem('contextWindow', cfg.contextWindow);
 
   showToast('Configurações salvas com sucesso!', 'success');
@@ -1333,9 +1341,10 @@ function renderTelemetryView() {
     return;
   }
   tbody.innerHTML = telemetry.calls.map(function(c) {
+    var thinkNote = c.reasoningTok ? ' · ' + c.reasoningTok + ' think' : '';
     return '<tr>' +
       '<td><b>Competência ' + c.comp + '</b></td>' +
-      '<td>' + c.totalTok.toLocaleString('pt-BR') + ' <span style="font-size:.72rem;color:var(--muted)">(' + c.promptTok + ' in / ' + c.compTok + ' out)</span></td>' +
+      '<td>' + c.totalTok.toLocaleString('pt-BR') + ' <span style="font-size:.72rem;color:var(--muted)">(' + c.promptTok + ' in / ' + c.compTok + ' out' + thinkNote + ')</span></td>' +
       '<td>' + c.kvCacheMb.toFixed(1) + ' MB <span style="font-size:.72rem;color:var(--muted)">(' + c.totalTok + ' tok)</span></td>' +
       '<td>' + c.durationSec.toFixed(2) + 's</td>' +
       '<td><b style="color:var(--gold)">' + c.tokPerSec.toFixed(1) + ' tok/s</b></td>' +
@@ -1497,7 +1506,9 @@ async function doOCR() {
 
     if (!resp.ok) throw new Error('Falha no servidor (HTTP ' + resp.status + ')');
     var data = await resp.json();
-    var text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    var msgObj = data.choices && data.choices[0] && data.choices[0].message;
+    var text = (msgObj && (msgObj.content || msgObj.reasoning_content)) || '';
+    text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     if (!text) throw new Error('A IA não retornou texto transcrito.');
 
     bar.style.width = '100%';
@@ -1758,24 +1769,64 @@ function buildPrompts(txt, tema) {
 }
 
 function repairJson(raw) {
-  var match = raw.match(/\{[\s\S]*/);
-  if (!match) return null;
-  var s = match[0];
-  try { return JSON.parse(s); } catch (e) {}
+  if (!raw || typeof raw !== 'string') return null;
 
-  // Fecha aspas abertas se número ímpar
-  var qc = (s.match(/(?<!\\)"/g) || []).length;
-  if (qc % 2 !== 0) s += '"';
+  // 1. Remove qualquer bloco <think>...</think> se vazado no corpo da resposta
+  var clean = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  if (!clean && raw) clean = raw.trim();
 
-  // Fecha chaves e colchetes pendentes
-  var stack = [];
-  for (var ci = 0; ci < s.length; ci++) {
-    if (s[ci] === '{') stack.push('}');
-    else if (s[ci] === '[') stack.push(']');
-    else if (s[ci] === '}' || s[ci] === ']') stack.pop();
+  // 2. Remove cercas de código markdown caso envolvam a resposta
+  clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // 3. Tenta parse direto
+  try { return JSON.parse(clean); } catch (e) {}
+
+  // 4. Procura o bloco JSON delimitado pelo primeiro '{' e o último '}'
+  var firstOpen = clean.indexOf('{');
+  var lastClose = clean.lastIndexOf('}');
+
+  if (firstOpen !== -1 && lastClose > firstOpen) {
+    var candidate = clean.slice(firstOpen, lastClose + 1);
+    try { return JSON.parse(candidate); } catch (e) {}
+
+    // Corrige vírgulas espúrias antes de fechamento de objeto ou array
+    var sanitized = candidate.replace(/,\s*([}\]])/g, '$1');
+    try { return JSON.parse(sanitized); } catch (e) {}
+
+    // Normaliza eventuais quebras de linha literais dentro de strings
+    var escaped = sanitized.replace(/[\u0000-\u001F]+/g, function(ch) {
+      if (ch === '\n') return '\\n';
+      if (ch === '\r') return '\\r';
+      if (ch === '\t') return '\\t';
+      return '';
+    });
+    try { return JSON.parse(escaped); } catch (e) {}
   }
-  s = s.replace(/,\s*$/, '') + stack.reverse().join('');
-  try { return JSON.parse(s); } catch (e) { return null; }
+
+  // 5. Se o JSON foi cortado (truncamento por limite de tokens), tenta reconstruir fechamento
+  if (firstOpen !== -1) {
+    var sub = clean.slice(firstOpen).replace(/```(?:json)?/gi, '').trim();
+    var qc = (sub.match(/(?<!\\)"/g) || []).length;
+    if (qc % 2 !== 0) sub += '"';
+
+    var stack = [];
+    var inString = false;
+    for (var ci = 0; ci < sub.length; ci++) {
+      var char = sub[ci];
+      if (char === '"' && (ci === 0 || sub[ci - 1] !== '\\')) {
+        inString = !inString;
+      }
+      if (!inString) {
+        if (char === '{') stack.push('}');
+        else if (char === '[') stack.push(']');
+        else if (char === '}' || char === ']') stack.pop();
+      }
+    }
+    var repaired = sub.replace(/,\s*$/, '') + stack.reverse().join('');
+    try { return JSON.parse(repaired); } catch (e) {}
+  }
+
+  return null;
 }
 
 // Pool Concorrente de Execução Otimizada
@@ -1862,8 +1913,8 @@ async function startCorrection() {
     document.getElementById('progPct').textContent = pct + '%';
   }
 
-  // Token ladder seguro para modelos locais (evita erro 400 por estouro de contexto de saída)
-  var TOKEN_LADDER = [4096, 3000, 2048];
+  // Token ladder seguro para modelos locais (mantém 4096 tokens para modelos de raciocínio, reduz apenas se o backend reportar HTTP 400 de limite de contexto)
+  var TOKEN_LADDER = [4096, 4096, 4096];
   var completedCount = 0;
   var failedComps = [];
 
@@ -1891,7 +1942,7 @@ async function startCorrection() {
             temperature: cfg.temp,
             max_tokens: maxTok
           }),
-          signal: AbortSignal.timeout(120000)
+          signal: AbortSignal.timeout(180000)
         });
 
         var tEnd = performance.now();
@@ -1901,7 +1952,9 @@ async function startCorrection() {
           var errBody = await resp.text();
           log('C' + i + ' — Erro HTTP ' + resp.status + ': ' + errBody.slice(0, 200));
           if (resp.status === 400 && t < TOKEN_LADDER.length - 1) {
-            log('C' + i + ' — Reajustando janela de saída...');
+            var reducedTok = Math.max(1500, maxTok - 1000);
+            log('C' + i + ' — Limite de contexto excedido (400). Reduzindo para max_tokens=' + reducedTok + '...');
+            TOKEN_LADDER[t + 1] = reducedTok;
             continue;
           }
           throw new Error('HTTP ' + resp.status);
@@ -1909,14 +1962,30 @@ async function startCorrection() {
 
         var data = await resp.json();
         var msgObj = data.choices && data.choices[0] && data.choices[0].message;
-        var raw = msgObj && (msgObj.content || msgObj.reasoning_content);
-        if (!raw) throw new Error('A IA retornou resposta vazia.');
+        if (!msgObj) throw new Error('A IA não retornou mensagem válida.');
 
+        var raw = (msgObj.content || '').trim();
         var parsed = repairJson(raw);
-        if (!parsed) throw new Error('Formato JSON inválido na resposta da IA.');
+
+        // Se o content estava vazio ou o JSON estava no bloco de raciocínio, tenta reasoning_content
+        if (!parsed && msgObj.reasoning_content && msgObj.reasoning_content.trim()) {
+          var rRaw = msgObj.reasoning_content.trim();
+          parsed = repairJson(rRaw);
+          if (parsed) {
+            raw = rRaw;
+            log('C' + i + ' — JSON extraído com sucesso do bloco de raciocínio da IA.');
+          }
+        }
+
+        if (!parsed) {
+          if (data.choices && data.choices[0] && data.choices[0].finish_reason === 'length') {
+            throw new Error('A resposta da IA foi truncada por estouro de max_tokens (finish_reason: length).');
+          }
+          throw new Error('Formato JSON inválido na resposta da IA.');
+        }
 
         // Cálculo de Métricas de Telemetria e KV Cache
-        var promptTok = 0, compTok = 0, totalTok = 0, cachedTok = 0;
+        var promptTok = 0, compTok = 0, totalTok = 0, cachedTok = 0, reasoningTok = 0;
         if (data.usage) {
           promptTok = data.usage.prompt_tokens || 0;
           compTok = data.usage.completion_tokens || 0;
@@ -1924,10 +1993,13 @@ async function startCorrection() {
           if (data.usage.prompt_tokens_details && data.usage.prompt_tokens_details.cached_tokens) {
             cachedTok = data.usage.prompt_tokens_details.cached_tokens;
           }
+          if (data.usage.completion_tokens_details && data.usage.completion_tokens_details.reasoning_tokens) {
+            reasoningTok = data.usage.completion_tokens_details.reasoning_tokens;
+          }
         } else {
           // Estimativa empírica caso o endpoint não retorne usage
           promptTok = Math.round((prompts[i - 1].length + txt.length) / 3.8);
-          compTok = Math.round(raw.length / 3.8);
+          compTok = Math.round((raw.length + ((msgObj.reasoning_content || '').length)) / 3.8);
           totalTok = promptTok + compTok;
         }
 
@@ -1947,6 +2019,7 @@ async function startCorrection() {
           comp: i,
           promptTok: promptTok,
           compTok: compTok,
+          reasoningTok: reasoningTok,
           totalTok: totalTok,
           cachedTok: cachedTok,
           tokPerSec: tokPerSec,
@@ -1999,7 +2072,8 @@ async function startCorrection() {
       } catch (err) {
         log('C' + i + ' — Erro na tentativa ' + (t + 1) + ': ' + err.message);
         if (t < TOKEN_LADDER.length - 1) {
-          await new Promise(function(r) { setTimeout(r, 1200); });
+          log('C' + i + ' — Aguardando 2s antes de tentar novamente...');
+          await new Promise(function(r) { setTimeout(r, 2000); });
         }
       }
     }
@@ -2007,6 +2081,7 @@ async function startCorrection() {
     if (!compSuccess) {
       if (stepEl) stepEl.className = 'comp-step error';
       failedComps.push(i);
+      log('C' + i + ' — Falha definitiva na avaliação após ' + TOKEN_LADDER.length + ' tentativas.');
     }
   }
 
@@ -2015,8 +2090,8 @@ async function startCorrection() {
     return function() { return evaluateSingleComp(num); };
   });
 
-  var concurrency = Math.max(1, Math.min(5, cfg.concurrency || 2));
-  log('Iniciando avaliação com concorrência = ' + concurrency + '...');
+  var concurrency = Math.max(1, Math.min(5, cfg.concurrency || 1));
+  log('Iniciando avaliação com concorrência = ' + concurrency + ' (modelo: ' + cfg.model + ')...');
   setP(10, 'Iniciando avaliação das competências...');
 
   await runConcurrentTasks(tasks, concurrency);
@@ -2296,7 +2371,7 @@ async function sendUserChatMessage() {
         temperature: 0.3,
         max_tokens: 1800
       }),
-      signal: AbortSignal.timeout(60000)
+      signal: AbortSignal.timeout(120000)
     });
 
     // Remove balão de digitação
@@ -2309,7 +2384,11 @@ async function sendUserChatMessage() {
 
     var data = await resp.json();
     var msgObj = data.choices && data.choices[0] && data.choices[0].message;
-    var reply = msgObj && (msgObj.content || msgObj.reasoning_content);
+    var reply = (msgObj && (msgObj.content || msgObj.reasoning_content)) || '';
+    reply = reply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    if (!reply && msgObj && msgObj.reasoning_content) {
+      reply = msgObj.reasoning_content.trim();
+    }
     if (!reply) throw new Error('A IA retornou resposta em branco.');
 
     appendAssistantMessage(reply.trim());
