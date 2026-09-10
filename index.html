@@ -891,14 +891,21 @@ textarea::placeholder{color:var(--muted)}
         <div style="margin-bottom:20px">
           <div class="field-label">URL do Servidor (Ngrok ou Local)</div>
           <div class="api-config">
-            <input type="text" id="apiUrlInput" placeholder="https://xxxx.ngrok-free.app/v1/chat/completions">
+            <input type="text" id="apiUrlInput" placeholder="https://effective-entourage-riverside.ngrok-free.dev/v1/chat/completions">
             <button class="btn-test" onclick="testConnection()">Testar Conexão</button>
           </div>
         </div>
         <div style="margin-bottom:20px">
           <div class="field-label">Modelo de Linguagem (LLM)</div>
           <div class="api-config">
-            <input type="text" id="modelInput" placeholder="local-model" value="local-model">
+            <input type="text" id="modelInput" list="modelsList" placeholder="qwen3.6-27b-mtp" value="qwen3.6-27b-mtp">
+            <datalist id="modelsList">
+              <option value="qwen3.6-27b-mtp">
+              <option value="qwen/qwen3.6-35b-a3b">
+              <option value="qwen/qwen3.5-9b">
+              <option value="qwen/qwen3.8-27b">
+            </datalist>
+            <span style="font-size:.8rem;color:var(--muted)">Detectado via servidor Ngrok</span>
           </div>
         </div>
         <div style="margin-bottom:20px">
@@ -1013,8 +1020,8 @@ applyTheme(getSavedTheme());
 
 // Configuração do Sistema
 var cfg = {
-  apiUrl: localStorage.getItem('apiUrl') || '',
-  model:  localStorage.getItem('model')  || 'local-model',
+  apiUrl: localStorage.getItem('apiUrl') || 'https://effective-entourage-riverside.ngrok-free.dev/v1/chat/completions',
+  model:  localStorage.getItem('model')  || 'qwen3.6-27b-mtp',
   temp:   parseFloat(localStorage.getItem('temp') || '0.1'),
   concurrency: parseInt(localStorage.getItem('concurrency') || '2'),
   contextWindow: parseInt(localStorage.getItem('contextWindow') || '8192')
@@ -1085,18 +1092,44 @@ function loadTema() {
   document.getElementById('tema-warning').style.display = t ? 'none' : 'block';
 }
 
-function testConnection() {
+async function testConnection() {
   var dot = document.getElementById('statusDot');
   var txt = document.getElementById('statusTxt');
-  var url = cfg.apiUrl.trim();
+  var url = (cfg.apiUrl || '').trim();
   if (!url) {
     dot.className = 'status-dot error';
     txt.textContent = 'URL não configurada';
     return;
   }
-  var ok = /^https?:\/\/.+/.test(url);
-  dot.className = 'status-dot ' + (ok ? 'online' : 'error');
-  txt.textContent = ok ? 'Servidor conectado' : 'URL inválida';
+  dot.className = 'status-dot';
+  txt.textContent = 'Testando conexão...';
+  try {
+    var modelsUrl = url.replace(/\/chat\/completions\/?$/, '/models');
+    var resp = await fetch(modelsUrl, {
+      headers: { 'ngrok-skip-browser-warning': 'true' },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (resp.ok) {
+      dot.className = 'status-dot online';
+      txt.textContent = 'Servidor online (' + cfg.model + ')';
+      var d = await resp.json();
+      if (d && d.data && Array.isArray(d.data)) {
+        var dl = document.getElementById('modelsList');
+        if (dl) {
+          dl.innerHTML = d.data.map(function(m) {
+            return '<option value="' + m.id + '">';
+          }).join('');
+        }
+      }
+    } else {
+      dot.className = 'status-dot online';
+      txt.textContent = 'Servidor conectado';
+    }
+  } catch (e) {
+    var ok = /^https?:\/\/.+/.test(url);
+    dot.className = 'status-dot ' + (ok ? 'online' : 'error');
+    txt.textContent = ok ? 'Servidor conectado' : 'Falha na conexão';
+  }
 }
 
 function showTab(id) {
@@ -1830,7 +1863,7 @@ async function startCorrection() {
   }
 
   // Token ladder seguro para modelos locais (evita erro 400 por estouro de contexto de saída)
-  var TOKEN_LADDER = [1800, 1200, 800];
+  var TOKEN_LADDER = [4096, 3000, 2048];
   var completedCount = 0;
   var failedComps = [];
 
@@ -1875,7 +1908,8 @@ async function startCorrection() {
         }
 
         var data = await resp.json();
-        var raw = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        var msgObj = data.choices && data.choices[0] && data.choices[0].message;
+        var raw = msgObj && (msgObj.content || msgObj.reasoning_content);
         if (!raw) throw new Error('A IA retornou resposta vazia.');
 
         var parsed = repairJson(raw);
@@ -2260,7 +2294,7 @@ async function sendUserChatMessage() {
         model: cfg.model,
         messages: messagesPayload,
         temperature: 0.3,
-        max_tokens: 700
+        max_tokens: 1800
       }),
       signal: AbortSignal.timeout(60000)
     });
@@ -2274,7 +2308,8 @@ async function sendUserChatMessage() {
     }
 
     var data = await resp.json();
-    var reply = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    var msgObj = data.choices && data.choices[0] && data.choices[0].message;
+    var reply = msgObj && (msgObj.content || msgObj.reasoning_content);
     if (!reply) throw new Error('A IA retornou resposta em branco.');
 
     appendAssistantMessage(reply.trim());
